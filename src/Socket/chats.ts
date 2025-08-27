@@ -226,7 +226,56 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		const results = await sock.executeUSyncQuery(usyncQuery)
 
 		if (results) {
-			return results.list.filter(a => !!a.contact).map(({ contact, id, lid }) => ({ jid: id, exists: contact, lid }))
+			const existing = results.list.filter(a => !!a.contact)
+			const enriched = await Promise.all(
+				existing.map(async ({ contact, id, lid }) => {
+					const verifiedBizName = await getVerifiedBizName(id)
+					return { jid: id, exists: contact, lid, verifiedBizName }
+				})
+			)
+			return enriched
+		}
+	}
+
+	const getVerifiedBizName = async (jid: string): Promise<string | undefined> => {
+		const results = await query({
+			tag: 'iq',
+			attrs: {
+				to: 's.whatsapp.net',
+				xmlns: 'w:biz',
+				type: 'get'
+			},
+			content: [
+				{
+					tag: 'business_profile',
+					attrs: { v: '244' },
+					content: [
+						{
+							tag: 'profile',
+							attrs: { jid }
+						}
+					]
+				}
+			]
+		})
+
+		const profileNode = getBinaryNodeChild(results, 'business_profile')
+		const profiles = getBinaryNodeChild(profileNode, 'profile')
+		if (profiles) {
+			// preferir display_name em biz_identity_info, se disponível
+			const bizIdentity = getBinaryNodeChild(profiles, 'biz_identity_info')
+			const displayName = bizIdentity?.attrs?.display_name as string | undefined
+			if (displayName) {
+				return displayName
+			}
+
+			const verifiedNode = getBinaryNodeChild(profiles, 'verified_name')
+			const content = verifiedNode?.content
+			if (content instanceof Uint8Array) {
+				const cert = proto.VerifiedNameCertificate.decode(content)
+				const details = proto.VerifiedNameCertificate.Details.decode(cert.details!)
+				return details.verifiedName || undefined
+			}
 		}
 	}
 
@@ -396,8 +445,11 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		})
 
 		const profileNode = getBinaryNodeChild(results, 'business_profile')
-		const profiles = getBinaryNodeChild(profileNode, 'profile')
+		const profiles = getBinaryNodeChild(profileNode, 'profile')		
 		if (profiles) {
+			// preferir display_name em biz_identity_info, se disponível
+			const bizIdentity = getBinaryNodeChild(profiles, 'biz_identity_info')
+			const verifiedBizName = bizIdentity?.attrs?.display_name as string | undefined		
 			const address = getBinaryNodeChild(profiles, 'address')
 			const description = getBinaryNodeChild(profiles, 'description')
 			const website = getBinaryNodeChild(profiles, 'website')
@@ -410,6 +462,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 			const websiteStr = website?.content?.toString()
 			return {
 				wid: profiles.attrs?.jid,
+				verifiedBizName: verifiedBizName || '',
 				address: address?.content?.toString(),
 				description: description?.content?.toString() || '',
 				website: websiteStr ? [websiteStr] : [],
@@ -1108,6 +1161,7 @@ export const makeChatsSocket = (config: SocketConfig) => {
 		updateGroupsAddPrivacy,
 		updateDefaultDisappearingMode,
 		getBusinessProfile,
+		getVerifiedBizName,
 		resyncAppState,
 		chatModify,
 		cleanDirtyBits,
