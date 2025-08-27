@@ -21,6 +21,7 @@ import {
 	getBinaryNodeChildren,
 	isJidGroup,
 	isJidUser,
+	isLidUser,
 	jidNormalizedUser
 } from '../WABinary'
 import { aesDecrypt, aesEncrypt, hkdf, hmacSign } from './crypto'
@@ -814,7 +815,7 @@ export const processSyncAction = (
 			{
 				id: id,
 				name: action.contactAction.fullName!,
-				lid: action.contactAction.lidJid || undefined,
+				lid: isLidUser(id) ? id : (action.contactAction.lidJid || undefined),
 				jid: isJidUser(id) ? id : undefined
 			}
 		])
